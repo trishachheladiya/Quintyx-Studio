@@ -5,6 +5,7 @@ from tkinter import ttk
 
 try:
     from .sidebar import Sidebar
+    from .services import ProjectService
     from .pages.dashboard import DashboardPage
     from .pages.projects import ProjectsPage
     from .pages.research import ResearchPage
@@ -12,6 +13,7 @@ try:
     from .pages.settings import SettingsPage
 except ImportError:
     from sidebar import Sidebar
+    from services import ProjectService
     from pages.dashboard import DashboardPage
     from pages.projects import ProjectsPage
     from pages.research import ResearchPage
@@ -60,6 +62,7 @@ class QuintyxStudioApp(tk.Tk):
         self.settings = self.load_settings()
         self.theme_name = self.settings.get("theme", "dark")
         self.palette = THEMES[self.theme_name]
+        self.project_service = ProjectService()
         self.pages: dict[str, ttk.Frame] = {}
         self.current_page = tk.StringVar(value=self.settings.get("last_page", "Dashboard"))
 
@@ -110,7 +113,7 @@ class QuintyxStudioApp(tk.Tk):
     def build_pages(self) -> None:
         self.pages = {
             "Dashboard": DashboardPage(self.page_host),
-            "Projects": ProjectsPage(self.page_host),
+            "Projects": ProjectsPage(self.page_host, self.project_service),
             "Research": ResearchPage(self.page_host),
             "Results": ResultsPage(self.page_host),
             "Settings": SettingsPage(
@@ -147,6 +150,7 @@ class QuintyxStudioApp(tk.Tk):
 
         self.style.configure("App.TFrame", background=self.palette["background"])
         self.style.configure("Surface.TFrame", background=self.palette["surface"])
+        self.style.configure("Card.TFrame", background=self.palette["surface_alt"])
         self.style.configure("Sidebar.TFrame", background=self.palette["surface"])
         self.style.configure(
             "Title.TLabel",
@@ -170,6 +174,24 @@ class QuintyxStudioApp(tk.Tk):
             "SurfaceBody.TLabel",
             background=self.palette["surface"],
             foreground=self.palette["muted"],
+            font=("Segoe UI", 10),
+        )
+        self.style.configure(
+            "CardTitle.TLabel",
+            background=self.palette["surface_alt"],
+            foreground=self.palette["text"],
+            font=("Segoe UI", 12, "bold"),
+        )
+        self.style.configure(
+            "CardBody.TLabel",
+            background=self.palette["surface_alt"],
+            foreground=self.palette["muted"],
+            font=("Segoe UI", 10),
+        )
+        self.style.configure(
+            "Error.TLabel",
+            background=self.palette["background"],
+            foreground="#ef4444",
             font=("Segoe UI", 10),
         )
         self.style.configure(
