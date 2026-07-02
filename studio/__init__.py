@@ -1,0 +1,2 @@
+"""Quintyx Studio desktop framework."""
+
