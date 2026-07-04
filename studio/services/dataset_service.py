@@ -35,3 +35,9 @@ class DatasetService:
     def assign_dataset_to_project(self, project: Project, dataset_name: str) -> Project:
         updated_project = self.workflow_manager.assign_dataset_to_project(project, dataset_name)
         return self.project_service.update_project_metadata(updated_project)
+
+    def add_progress_callback(self, callback) -> None:
+        self.workflow_manager.add_progress_callback(callback)
+
+    def add_completion_callback(self, callback) -> None:
+        self.workflow_manager.add_completion_callback(callback)

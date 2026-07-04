@@ -100,11 +100,10 @@ class DatasetManager:
             "Symbol": dataset.symbol,
             "Timeframe": dataset.timeframe,
             "Candles": f"{dataset.candles:,}",
-            "Start Date": dataset.start_date,
-            "End Date": dataset.end_date,
+            "Date Range": f"{dataset.start_date} -> {dataset.end_date}",
             "Missing Candles": f"{dataset.missing_candles:,}",
             "Quality": dataset.quality,
-            "CSV File Path": dataset.path,
+            "CSV Path": dataset.path,
         }
 
     def assign_dataset_to_project(self, project: Project, dataset_name: str) -> Project:

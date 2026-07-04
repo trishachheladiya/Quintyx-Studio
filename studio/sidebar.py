@@ -29,7 +29,7 @@ class Sidebar(ttk.Frame):
 
         self.footer = ttk.Label(
             self,
-            text="Phase 1",
+            text="Phase 4",
             style="SurfaceBody.TLabel",
         )
         self.footer.pack(side="bottom", anchor="w", padx=22, pady=22)

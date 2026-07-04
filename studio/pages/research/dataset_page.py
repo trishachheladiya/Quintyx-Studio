@@ -49,6 +49,26 @@ class DatasetLibrary(ttk.Frame):
                 state="disabled",
             ).grid(row=0, column=index, sticky="w", padx=(0, 8))
 
+        self.progress_frame = ttk.Frame(self, style="Surface.TFrame")
+        self.progress_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        self.progress_frame.columnconfigure(0, weight=1)
+        self.progress_label = ttk.Label(
+            self.progress_frame,
+            text="",
+            style="SurfaceBody.TLabel",
+        )
+        self.progress_label.grid(row=0, column=0, sticky="w")
+        self.progress_bar = ttk.Progressbar(
+            self.progress_frame,
+            mode="determinate",
+            maximum=100,
+        )
+        self.progress_bar.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        self.progress_frame.grid_remove()
+
+        self.dataset_service.add_progress_callback(self._on_task_progress)
+        self.dataset_service.add_completion_callback(self._on_task_completion)
+
         self.refresh_data()
 
     def refresh_data(self) -> None:
@@ -146,3 +166,21 @@ class DatasetLibrary(ttk.Frame):
 
     def refresh_theme(self, palette: dict[str, str]) -> None:
         self.dataset_list.refresh_theme(palette)
+
+    def _on_task_progress(self, progress) -> None:
+        self.after(0, lambda: self._update_progress(progress))
+
+    def _on_task_completion(self, progress) -> None:
+        self.after(0, lambda: self._update_progress(progress, completed=True))
+
+    def _update_progress(self, progress, completed: bool = False) -> None:
+        self.progress_frame.grid()
+        self.progress_label.configure(text=f"{progress.task_name}: {progress.message} ({progress.status.value})")
+        self.progress_bar["value"] = progress.percent
+        if completed:
+            self.after(3000, self._hide_progress)
+
+    def _hide_progress(self) -> None:
+        self.progress_frame.grid_remove()
+        self.progress_bar["value"] = 0
+        self.progress_label.configure(text="")
