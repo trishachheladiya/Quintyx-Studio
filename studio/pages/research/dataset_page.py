@@ -30,6 +30,25 @@ class DatasetLibrary(ttk.Frame):
         self.dashboard.grid(row=1, column=1, sticky="nsew", pady=(16, 0))
         self.dashboard.columnconfigure(0, weight=1)
 
+        self.workflow_actions = ttk.Frame(self, style="Surface.TFrame")
+        self.workflow_actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(18, 0))
+        for index, label in enumerate(
+            (
+                "Generate Features",
+                "Generate Labels",
+                "Train Model",
+                "Threshold Analysis",
+                "Backtest",
+                "Generate Report",
+            )
+        ):
+            ttk.Button(
+                self.workflow_actions,
+                text=label,
+                style="Studio.TButton",
+                state="disabled",
+            ).grid(row=0, column=index, sticky="w", padx=(0, 8))
+
         self.refresh_data()
 
     def refresh_data(self) -> None:
@@ -127,4 +146,3 @@ class DatasetLibrary(ttk.Frame):
 
     def refresh_theme(self, palette: dict[str, str]) -> None:
         self.dataset_list.refresh_theme(palette)
-

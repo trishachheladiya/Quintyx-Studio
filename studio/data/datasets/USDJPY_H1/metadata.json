@@ -1,10 +1,33 @@
 {
   "symbol": "USDJPY",
   "timeframe": "H1",
-  "candles": 182771,
-  "start": "2003-01-01",
-  "end": "2026-01-01",
-  "missing": 3,
-  "quality": "Excellent",
-  "timezone": "UTC"
+  "candles": 39959,
+  "start": "2020-01-02",
+  "end": "2026-06-05",
+  "missing_candles": 269,
+  "duplicates": 0,
+  "required_columns": {
+    "expected": [
+      "time",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "present": [
+      "time",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "missing": []
+  },
+  "nan_values": 0,
+  "timestamps_sorted": true,
+  "quality": "Fair",
+  "timezone": "UTC",
+  "validation_errors": []
 }

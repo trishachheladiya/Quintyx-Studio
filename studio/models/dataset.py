@@ -25,7 +25,7 @@ class Dataset:
             start_date=metadata.get("start", ""),
             end_date=metadata.get("end", ""),
             candles=int(metadata.get("candles") or 0),
-            missing_candles=int(metadata.get("missing") or 0),
+            missing_candles=int(metadata.get("missing_candles", metadata.get("missing", 0)) or 0),
             quality=metadata.get("quality", "Unknown"),
             timezone=metadata.get("timezone", "UTC"),
             file_size=file_size,
@@ -33,4 +33,3 @@ class Dataset:
 
     def to_project_reference(self) -> str:
         return self.name
-

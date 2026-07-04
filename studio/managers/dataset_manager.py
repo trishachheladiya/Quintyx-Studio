@@ -1,4 +1,6 @@
+import csv
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 try:
@@ -8,8 +10,8 @@ except ImportError:
 
 
 DATASET_METADATA_FILE = "metadata.json"
-DATASET_DATA_FILE = "data.parquet"
 REQUIRED_COLUMNS = ("time", "open", "high", "low", "close", "volume")
+SUPPORTED_DATASETS = ("EURUSD_H1", "GBPUSD_H1", "USDJPY_H1")
 
 
 class DatasetValidationError(ValueError):
@@ -28,205 +30,244 @@ class DatasetManager:
             return []
 
         datasets: list[Dataset] = []
-        for dataset_path in sorted(self.datasets_root.iterdir(), key=lambda item: item.name.lower()):
+        for dataset_name in SUPPORTED_DATASETS:
+            dataset_path = self.datasets_root / dataset_name
             if dataset_path.is_dir():
                 try:
-                    datasets.append(self.load_dataset(dataset_path.name, validate=False))
+                    datasets.append(self.load_dataset(dataset_name, rebuild_metadata=True))
                 except (OSError, json.JSONDecodeError, DatasetValidationError):
                     continue
         return datasets
 
-    def load_dataset(self, name: str, validate: bool = False) -> Dataset:
+    def load_dataset(self, name: str, rebuild_metadata: bool = False, validate: bool | None = None) -> Dataset:
+        if name not in SUPPORTED_DATASETS:
+            raise DatasetValidationError(f"Unsupported dataset: {name}")
+
+        if validate is not None:
+            rebuild_metadata = validate
+
         dataset_path = self.datasets_root / name
         metadata_path = dataset_path / DATASET_METADATA_FILE
-        data_path = dataset_path / DATASET_DATA_FILE
+        csv_path = self._csv_path(name)
 
-        if not metadata_path.exists():
-            raise DatasetValidationError(f"Dataset metadata missing: {name}")
-
-        with metadata_path.open("r", encoding="utf-8") as file:
-            metadata = json.load(file)
-
-        if validate:
+        if rebuild_metadata or not metadata_path.exists():
             metadata = self.validate_dataset(name, update_metadata=True)
+        else:
+            with metadata_path.open("r", encoding="utf-8") as file:
+                metadata = json.load(file)
 
-        file_size = data_path.stat().st_size if data_path.exists() else 0
-        return Dataset.from_metadata(name, str(dataset_path), metadata, file_size)
+        file_size = csv_path.stat().st_size if csv_path.exists() else 0
+        return Dataset.from_metadata(name, str(csv_path), metadata, file_size)
 
     def validate_dataset(self, name: str, update_metadata: bool = True) -> dict:
+        if name not in SUPPORTED_DATASETS:
+            raise DatasetValidationError(f"Unsupported dataset: {name}")
+
         dataset_path = self.datasets_root / name
+        csv_path = self._csv_path(name)
         metadata_path = dataset_path / DATASET_METADATA_FILE
-        data_path = dataset_path / DATASET_DATA_FILE
 
-        if not metadata_path.exists():
-            raise DatasetValidationError(f"Dataset metadata missing: {name}")
+        if not csv_path.exists():
+            raise DatasetValidationError(f"CSV file missing: {name}")
 
-        with metadata_path.open("r", encoding="utf-8") as file:
-            metadata = json.load(file)
-
-        results = {
-            "file_exists": data_path.exists(),
-            "metadata_exists": metadata_path.exists(),
-            "required_columns_present": False,
-            "timestamps_sorted": None,
-            "duplicates": None,
-            "missing_timestamps": metadata.get("missing", 0),
-            "nan_values": None,
-            "validation_status": "not_validated",
-            "validation_errors": [],
+        symbol, timeframe = self._parse_dataset_name(name)
+        stats = self._calculate_csv_statistics(csv_path, timeframe)
+        metadata = {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "candles": stats["candles"],
+            "start": stats["start"],
+            "end": stats["end"],
+            "missing_candles": stats["missing_candles"],
+            "duplicates": stats["duplicates"],
+            "required_columns": stats["required_columns"],
+            "nan_values": stats["nan_values"],
+            "timestamps_sorted": stats["timestamps_sorted"],
+            "quality": self._quality_rating(stats),
+            "timezone": "UTC",
+            "validation_errors": stats["validation_errors"],
         }
 
-        if not data_path.exists():
-            results["validation_status"] = "invalid"
-            results["validation_errors"].append("data.parquet is missing")
-            metadata = self._merge_validation(metadata, results, update_metadata, metadata_path)
-            return metadata
-
-        column_results = self._validate_parquet_file(data_path, metadata)
-        results.update(column_results)
-        if results["validation_errors"]:
-            results["validation_status"] = "invalid"
-            metadata["quality"] = "Invalid"
-        else:
-            results["validation_status"] = "valid"
-            metadata["quality"] = metadata.get("quality", "Excellent")
-
-        return self._merge_validation(metadata, results, update_metadata, metadata_path)
-
-    def get_statistics(self, name: str) -> dict:
-        dataset = self.load_dataset(name)
-        return {
-            "Dataset": dataset.symbol,
-            "Timeframe": dataset.timeframe,
-            "Candles": f"{dataset.candles:,}",
-            "Coverage": f"{dataset.start_date}-{dataset.end_date}",
-            "Missing Candles": f"{dataset.missing_candles:,}",
-            "Quality": dataset.quality,
-            "Timezone": dataset.timezone,
-            "File Size": self._format_file_size(dataset.file_size),
-        }
-
-    def assign_dataset_to_project(self, project: Project, dataset_name: str) -> Project:
-        dataset = self.load_dataset(dataset_name)
-        project.dataset = dataset.to_project_reference()
-        return project
-
-    def _validate_parquet_file(self, data_path: Path, metadata: dict) -> dict:
-        pyarrow_result = self._validate_with_pyarrow(data_path, metadata)
-        if pyarrow_result is not None:
-            return pyarrow_result
-
-        pandas_result = self._validate_with_pandas(data_path, metadata)
-        if pandas_result is not None:
-            return pandas_result
-
-        return {
-            "required_columns_present": False,
-            "timestamps_sorted": None,
-            "duplicates": None,
-            "missing_timestamps": metadata.get("missing", 0),
-            "nan_values": None,
-            "validation_errors": ["No Parquet engine available to validate data.parquet"],
-        }
-
-    def _validate_with_pyarrow(self, data_path: Path, metadata: dict) -> dict | None:
-        try:
-            import pyarrow.parquet as pq
-        except ImportError:
-            return None
-
-        try:
-            parquet_file = pq.ParquetFile(data_path)
-            columns = parquet_file.schema.names
-        except Exception as error:
-            return self._invalid_result(metadata, f"Unable to read Parquet schema: {error}")
-
-        errors = self._column_errors(columns)
-        if errors:
-            return self._result(metadata, False, None, None, None, errors)
-
-        try:
-            table = parquet_file.read(columns=list(REQUIRED_COLUMNS))
-            frame = table.to_pandas()
-            return self._validate_frame(frame, metadata)
-        except Exception as error:
-            return self._invalid_result(metadata, f"Unable to validate Parquet rows: {error}")
-
-    def _validate_with_pandas(self, data_path: Path, metadata: dict) -> dict | None:
-        try:
-            import pandas as pd
-        except ImportError:
-            return None
-
-        try:
-            frame = pd.read_parquet(data_path)
-        except Exception as error:
-            return self._invalid_result(metadata, f"Unable to read Parquet file: {error}")
-
-        columns = list(frame.columns)
-        errors = self._column_errors(columns)
-        if errors:
-            return self._result(metadata, False, None, None, None, errors)
-
-        return self._validate_frame(frame, metadata)
-
-    def _validate_frame(self, frame, metadata: dict) -> dict:
-        errors = []
-        time_series = frame["time"]
-        timestamps_sorted = bool(time_series.is_monotonic_increasing)
-        duplicates = int(time_series.duplicated().sum())
-        nan_values = int(frame[list(REQUIRED_COLUMNS)].isna().sum().sum())
-
-        if not timestamps_sorted:
-            errors.append("Timestamps are not sorted")
-        if duplicates:
-            errors.append("Duplicate timestamps found")
-        if nan_values:
-            errors.append("NaN values found")
-
-        return self._result(metadata, True, timestamps_sorted, duplicates, nan_values, errors)
-
-    def _column_errors(self, columns: list[str]) -> list[str]:
-        missing = [column for column in REQUIRED_COLUMNS if column not in columns]
-        if missing:
-            return [f"Missing required columns: {', '.join(missing)}"]
-        return []
-
-    def _invalid_result(self, metadata: dict, error: str) -> dict:
-        return self._result(metadata, False, None, None, None, [error])
-
-    def _result(
-        self,
-        metadata: dict,
-        required_columns_present: bool,
-        timestamps_sorted,
-        duplicates,
-        nan_values,
-        errors: list[str],
-    ) -> dict:
-        return {
-            "required_columns_present": required_columns_present,
-            "timestamps_sorted": timestamps_sorted,
-            "duplicates": duplicates,
-            "missing_timestamps": metadata.get("missing", 0),
-            "nan_values": nan_values,
-            "validation_errors": errors,
-        }
-
-    def _merge_validation(self, metadata: dict, results: dict, update_metadata: bool, metadata_path: Path) -> dict:
-        metadata["validation"] = results
-        if results.get("validation_status") == "invalid":
-            metadata["quality"] = "Invalid"
         if update_metadata:
             with metadata_path.open("w", encoding="utf-8") as file:
                 json.dump(metadata, file, indent=2)
         return metadata
 
-    def _format_file_size(self, size: int) -> str:
-        if size <= 0:
-            return "0 B"
-        for unit in ("B", "KB", "MB", "GB"):
-            if size < 1024:
-                return f"{size:.0f} {unit}"
-            size = size / 1024
-        return f"{size:.1f} TB"
+    def get_statistics(self, name: str) -> dict:
+        dataset = self.load_dataset(name)
+        return {
+            "Dataset": dataset.name,
+            "Symbol": dataset.symbol,
+            "Timeframe": dataset.timeframe,
+            "Candles": f"{dataset.candles:,}",
+            "Start Date": dataset.start_date,
+            "End Date": dataset.end_date,
+            "Missing Candles": f"{dataset.missing_candles:,}",
+            "Quality": dataset.quality,
+            "CSV File Path": dataset.path,
+        }
+
+    def assign_dataset_to_project(self, project: Project, dataset_name: str) -> Project:
+        dataset = self.load_dataset(dataset_name, rebuild_metadata=True)
+        project.dataset = dataset.to_project_reference()
+        return project
+
+    def _calculate_csv_statistics(self, csv_path: Path, timeframe: str) -> dict:
+        timestamps = []
+        duplicates = 0
+        nan_values = 0
+        validation_errors = []
+        seen_timestamps = set()
+
+        with csv_path.open("r", encoding="utf-8-sig", newline="") as file:
+            sample = file.read(4096)
+            file.seek(0)
+            dialect = csv.Sniffer().sniff(sample, delimiters="\t,;")
+            reader = csv.DictReader(file, dialect=dialect)
+            headers = reader.fieldnames or []
+            column_map = self._column_map(headers)
+            missing_columns = [column for column in REQUIRED_COLUMNS if column not in column_map]
+
+            if missing_columns:
+                validation_errors.append(f"Missing required columns: {', '.join(missing_columns)}")
+
+            for row in reader:
+                timestamp = self._row_timestamp(row, column_map)
+                if timestamp is None:
+                    nan_values += 1
+                    continue
+
+                if timestamp in seen_timestamps:
+                    duplicates += 1
+                seen_timestamps.add(timestamp)
+                timestamps.append(timestamp)
+
+                for logical_column in ("open", "high", "low", "close", "volume"):
+                    source_column = column_map.get(logical_column)
+                    value = row.get(source_column, "").strip() if source_column else ""
+                    if value == "":
+                        nan_values += 1
+
+        timestamps_sorted = timestamps == sorted(timestamps)
+        if not timestamps_sorted:
+            validation_errors.append("Timestamps are not sorted")
+        if duplicates:
+            validation_errors.append("Duplicate timestamps found")
+        if nan_values:
+            validation_errors.append("Missing or NaN values found")
+
+        missing_candles = self._missing_candles(sorted(set(timestamps)), timeframe)
+        return {
+            "candles": len(timestamps),
+            "start": self._date_text(min(timestamps)) if timestamps else "",
+            "end": self._date_text(max(timestamps)) if timestamps else "",
+            "missing_candles": missing_candles,
+            "duplicates": duplicates,
+            "required_columns": {
+                "expected": list(REQUIRED_COLUMNS),
+                "present": [column for column in REQUIRED_COLUMNS if column in column_map],
+                "missing": missing_columns,
+            },
+            "nan_values": nan_values,
+            "timestamps_sorted": timestamps_sorted,
+            "validation_errors": validation_errors,
+        }
+
+    def _column_map(self, headers: list[str]) -> dict[str, str]:
+        normalized = {self._normalize_header(header): header for header in headers}
+        column_map = {}
+
+        if "date" in normalized and "time_source" in normalized:
+            column_map["date"] = normalized["date"]
+            column_map["time"] = normalized["time_source"]
+        elif "time" in normalized:
+            column_map["time"] = normalized["time"]
+
+        direct_columns = {
+            "open": ("open",),
+            "high": ("high",),
+            "low": ("low",),
+            "close": ("close",),
+            "volume": ("volume", "tickvol", "vol"),
+        }
+        for logical_name, candidates in direct_columns.items():
+            for candidate in candidates:
+                if candidate in normalized:
+                    column_map[logical_name] = normalized[candidate]
+                    break
+        return column_map
+
+    def _row_timestamp(self, row: dict, column_map: dict[str, str]) -> datetime | None:
+        date_column = column_map.get("date")
+        time_column = column_map.get("time")
+        if date_column and time_column:
+            date_text = row.get(date_column, "").strip()
+            time_text = row.get(time_column, "").strip()
+            return self._parse_timestamp(f"{date_text} {time_text}")
+        if time_column:
+            return self._parse_timestamp(row.get(time_column, "").strip())
+        return None
+
+    def _parse_timestamp(self, value: str) -> datetime | None:
+        for fmt in ("%Y.%m.%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+        return None
+
+    def _missing_candles(self, timestamps: list[datetime], timeframe: str) -> int:
+        if len(timestamps) < 2:
+            return 0
+
+        step = self._timeframe_delta(timeframe)
+        missing = 0
+        for previous, current in zip(timestamps, timestamps[1:]):
+            expected = previous + step
+            while expected < current:
+                if self._is_expected_market_time(expected):
+                    missing += 1
+                expected += step
+        return missing
+
+    def _is_expected_market_time(self, timestamp: datetime) -> bool:
+        return timestamp.weekday() < 5
+
+    def _timeframe_delta(self, timeframe: str) -> timedelta:
+        if timeframe.upper().endswith("H"):
+            return timedelta(hours=int(timeframe[:-1]))
+        if timeframe.upper().endswith("M"):
+            return timedelta(minutes=int(timeframe[:-1]))
+        return timedelta(hours=1)
+
+    def _quality_rating(self, stats: dict) -> str:
+        if stats["required_columns"]["missing"] or not stats["timestamps_sorted"] or stats["duplicates"] or stats["nan_values"]:
+            return "Invalid"
+        if stats["candles"] == 0:
+            return "Invalid"
+
+        missing_ratio = stats["missing_candles"] / stats["candles"]
+        if missing_ratio == 0:
+            return "Excellent"
+        if missing_ratio <= 0.005:
+            return "Good"
+        if missing_ratio <= 0.02:
+            return "Fair"
+        return "Poor"
+
+    def _csv_path(self, name: str) -> Path:
+        return self.datasets_root / name / f"{name}.csv"
+
+    def _parse_dataset_name(self, name: str) -> tuple[str, str]:
+        symbol, timeframe = name.rsplit("_", 1)
+        return symbol, timeframe
+
+    def _date_text(self, value: datetime) -> str:
+        return value.date().isoformat()
+
+    def _normalize_header(self, header: str) -> str:
+        raw = header.strip()
+        text = raw.lower().replace("<", "").replace(">", "")
+        if raw.upper() == "<TIME>":
+            return "time_source"
+        return text
