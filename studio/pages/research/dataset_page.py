@@ -1,17 +1,23 @@
+import csv
+from pathlib import Path
+import tkinter as tk
 from tkinter import messagebox, ttk
 
 try:
     from ..projects.widgets import ScrollFrame
+    from ...features import FeatureRegistry
     from .dataset_card import DatasetCard
 except ImportError:
     from pages.projects.widgets import ScrollFrame
+    from features import FeatureRegistry
     from pages.research.dataset_card import DatasetCard
 
 
 class DatasetLibrary(ttk.Frame):
-    def __init__(self, parent, dataset_service, get_current_project, set_current_project) -> None:
+    def __init__(self, parent, dataset_service, feature_service, get_current_project, set_current_project) -> None:
         super().__init__(parent, style="Surface.TFrame")
         self.dataset_service = dataset_service
+        self.feature_service = feature_service
         self.get_current_project = get_current_project
         self.set_current_project = set_current_project
         self.datasets = []
@@ -30,27 +36,41 @@ class DatasetLibrary(ttk.Frame):
         self.dashboard.grid(row=1, column=1, sticky="nsew", pady=(16, 0))
         self.dashboard.columnconfigure(0, weight=1)
 
-        self.workflow_actions = ttk.Frame(self, style="Surface.TFrame")
-        self.workflow_actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(18, 0))
-        for index, label in enumerate(
-            (
-                "Generate Features",
-                "Generate Labels",
-                "Train Model",
-                "Threshold Analysis",
-                "Backtest",
-                "Generate Report",
-            )
-        ):
-            ttk.Button(
-                self.workflow_actions,
-                text=label,
-                style="Studio.TButton",
-                state="disabled",
-            ).grid(row=0, column=index, sticky="w", padx=(0, 8))
+        self.feature_panel = ttk.Frame(self, style="Card.TFrame", padding=18)
+        self.feature_panel.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(18, 0))
+        self.feature_panel.columnconfigure(0, weight=1)
+        ttk.Label(self.feature_panel, text="Feature Selection", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.feature_registry = FeatureRegistry()
+        self.feature_vars: dict[str, tk.BooleanVar] = {}
+        self.feature_checkbuttons: list[ttk.Checkbutton] = []
+        row_index = 1
+        for category in ("Trend", "Momentum", "Volatility", "Returns", "Price Structure", "Price Action", "Time"):
+            ttk.Label(self.feature_panel, text=category, style="CardBody.TLabel").grid(row=row_index, column=0, sticky="w", pady=(12, 4))
+            row_index += 1
+            for definition in sorted(self.feature_registry.get_definitions_by_category().get(category, []), key=lambda item: item.name):
+                variable = tk.BooleanVar(value=definition.name in {"EMA20", "EMA50", "RSI14", "ATR14", "Return1", "Body", "Hour"})
+                self.feature_vars[definition.name] = variable
+                checkbutton = ttk.Checkbutton(self.feature_panel, text=definition.name, variable=variable)
+                checkbutton.grid(row=row_index, column=0, sticky="w", padx=(12, 0))
+                self.feature_checkbuttons.append(checkbutton)
+                row_index += 1
+
+        self.generate_button = ttk.Button(self.feature_panel, text="Generate Features", style="Studio.TButton", command=self.generate_features)
+        self.generate_button.grid(row=row_index, column=0, sticky="w", pady=(14, 0))
+
+        self.preview_frame = ttk.Frame(self, style="Card.TFrame", padding=18)
+        self.preview_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(14, 0))
+        self.preview_frame.columnconfigure(0, weight=1)
+        ttk.Label(self.preview_frame, text="Generation Preview", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.preview_text = tk.Text(self.preview_frame, height=10, wrap="none", borderwidth=0, highlightthickness=0)
+        self.preview_text.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        self.preview_scrollbar = ttk.Scrollbar(self.preview_frame, orient="vertical", command=self.preview_text.yview)
+        self.preview_scrollbar.grid(row=1, column=1, sticky="ns")
+        self.preview_text.configure(yscrollcommand=self.preview_scrollbar.set)
+        self.preview_frame.grid_remove()
 
         self.progress_frame = ttk.Frame(self, style="Surface.TFrame")
-        self.progress_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        self.progress_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(14, 0))
         self.progress_frame.columnconfigure(0, weight=1)
         self.progress_label = ttk.Label(
             self.progress_frame,
@@ -163,6 +183,78 @@ class DatasetLibrary(ttk.Frame):
 
         self.set_current_project(updated_project)
         self.refresh_data()
+
+    def generate_features(self) -> None:
+        project = self.get_current_project()
+        if project is None:
+            messagebox.showinfo("Feature Generation", "Open a project before generating features.")
+            return
+        if not project.dataset:
+            messagebox.showinfo("Feature Generation", "Select a dataset before generating features.")
+            return
+
+        selected_features = [name for name, variable in self.feature_vars.items() if variable.get()]
+        if not selected_features:
+            messagebox.showinfo("Feature Generation", "Select at least one feature to generate.")
+            return
+
+        self.generate_button.configure(state="disabled")
+        self.preview_frame.grid_remove()
+        self.progress_frame.grid()
+        self.progress_label.configure(text="Queued: waiting for workflow")
+        self.progress_bar["value"] = 0
+
+        try:
+            self.feature_service.generate_features(
+                project_path=project.path,
+                dataset_path=self.dataset_service.get_dataset(project.dataset).path,
+                selected_features=selected_features,
+                on_complete=self._on_generation_complete,
+            )
+        except (OSError, ValueError) as error:
+            self.generate_button.configure(state="normal")
+            self.progress_frame.grid_remove()
+            messagebox.showerror("Feature Generation", str(error))
+            return
+
+        self.progress_label.configure(text="Queued: workflow started")
+
+    def _on_generation_complete(self, result, error) -> None:
+        def update_ui() -> None:
+            self.generate_button.configure(state="normal")
+            if error:
+                self.progress_frame.grid_remove()
+                messagebox.showerror("Feature Generation", str(error))
+                return
+
+            self.progress_frame.grid_remove()
+            self.preview_frame.grid()
+            self.preview_text.delete("1.0", tk.END)
+            output_path = Path(result["output_path"]) if result else None
+            if output_path and output_path.exists():
+                self._render_preview(output_path)
+                self.progress_label.configure(text=f"Completed: {result['rows']} rows -> {result['generated_features']} features")
+            else:
+                self.preview_text.insert("1.0", "No preview available.")
+
+        self.after(0, update_ui)
+
+    def _render_preview(self, output_path: Path) -> None:
+        try:
+            with output_path.open("r", encoding="utf-8", newline="") as handle:
+                reader = csv.reader(handle)
+                rows = list(reader)
+        except OSError:
+            self.preview_text.insert("1.0", "Preview unavailable.")
+            return
+
+        if len(rows) <= 1:
+            self.preview_text.insert("1.0", "No data rows available.")
+            return
+
+        preview_rows = rows[:11]
+        text = "\n".join("\t".join(row) for row in preview_rows)
+        self.preview_text.insert("1.0", text)
 
     def refresh_theme(self, palette: dict[str, str]) -> None:
         self.dataset_list.refresh_theme(palette)

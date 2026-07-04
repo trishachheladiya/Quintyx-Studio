@@ -6,6 +6,7 @@ from tkinter import ttk
 try:
     from .sidebar import Sidebar
     from .services import DatasetService
+    from .services import FeatureService
     from .services import ProjectService
     from .pages.dashboard import DashboardPage
     from .pages.projects import ProjectsPage
@@ -15,6 +16,7 @@ try:
 except ImportError:
     from sidebar import Sidebar
     from services import DatasetService
+    from services import FeatureService
     from services import ProjectService
     from pages.dashboard import DashboardPage
     from pages.projects import ProjectsPage
@@ -65,7 +67,10 @@ class QuintyxStudioApp(tk.Tk):
         self.theme_name = self.settings.get("theme", "dark")
         self.palette = THEMES[self.theme_name]
         self.project_service = ProjectService()
-        self.dataset_service = DatasetService(project_service=self.project_service)
+        self.workflow_manager = None
+        self.dataset_service = None
+        self.feature_service = None
+        self._build_services()
         self.current_project = None
         self.pages: dict[str, ttk.Frame] = {}
         self.current_page = tk.StringVar(value=self.settings.get("last_page", "Dashboard"))
@@ -92,6 +97,13 @@ class QuintyxStudioApp(tk.Tk):
         self.show_page(self.current_page.get())
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def _build_services(self) -> None:
+        from .workflow import WorkflowManager
+
+        self.workflow_manager = WorkflowManager()
+        self.dataset_service = DatasetService(project_service=self.project_service, workflow_manager=self.workflow_manager)
+        self.feature_service = FeatureService(workflow_manager=self.workflow_manager)
 
     def load_settings(self) -> dict[str, str]:
         if not SETTINGS_FILE.exists():
@@ -125,6 +137,7 @@ class QuintyxStudioApp(tk.Tk):
             "Research": ResearchPage(
                 self.page_host,
                 self.dataset_service,
+                self.feature_service,
                 get_current_project=lambda: self.current_project,
                 set_current_project=self.set_current_project,
             ),

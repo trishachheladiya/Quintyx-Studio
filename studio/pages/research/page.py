@@ -10,13 +10,14 @@ class ResearchPage(Page):
     title = "Research"
     subtitle = "Browse and assign project datasets."
 
-    def __init__(self, parent, dataset_service, get_current_project, set_current_project) -> None:
+    def __init__(self, parent, dataset_service, feature_service, get_current_project, set_current_project) -> None:
         super().__init__(parent)
         self.content.rowconfigure(0, weight=1)
 
         self.dataset_library = DatasetLibrary(
             self.content,
             dataset_service,
+            feature_service,
             get_current_project,
             set_current_project,
         )

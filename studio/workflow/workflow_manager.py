@@ -1,11 +1,13 @@
+import threading
+
 try:
     from ..managers import DatasetManager
     from .progress import TaskProgress
-    from .task import LoadDatasetTask, ProgressCallback, Task
+    from .task import GenerateFeaturesTask, LoadDatasetTask, ProgressCallback, Task
 except ImportError:
     from managers import DatasetManager
     from workflow.progress import TaskProgress
-    from workflow.task import LoadDatasetTask, ProgressCallback, Task
+    from workflow.task import GenerateFeaturesTask, LoadDatasetTask, ProgressCallback, Task
 
 
 class WorkflowManager:
@@ -37,11 +39,30 @@ class WorkflowManager:
         self.load_dataset(dataset_name)
         return self.dataset_manager.assign_dataset_to_project(project, dataset_name)
 
+    def create_feature_generation_task(self, project_path, dataset_path, selected_features, feature_engine):
+        return GenerateFeaturesTask(project_path=project_path, dataset_path=dataset_path, selected_features=selected_features, feature_engine=feature_engine)
+
     def execute_task(self, task: Task):
         task.add_progress_callback(self._emit_progress)
         result = task.execute()
         self._emit_completion(TaskProgress(task.name, task.status, "Task completed", task.progress))
         return result
+
+    def execute_task_async(self, task: Task, on_done=None):
+        def runner() -> None:
+            try:
+                result = self.execute_task(task)
+            except Exception as error:
+                self._emit_completion(TaskProgress(task.name, task.status, str(error), task.progress))
+                if on_done is not None:
+                    on_done(None, error)
+                return
+            if on_done is not None:
+                on_done(result, None)
+
+        thread = threading.Thread(target=runner, daemon=True)
+        thread.start()
+        return thread
 
     def _emit_progress(self, progress: TaskProgress) -> None:
         for callback in self.progress_callbacks:
