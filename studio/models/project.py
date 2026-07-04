@@ -10,7 +10,7 @@ class Project:
     created_at: str
     last_opened: str
     status: str
-    dataset: None = None
+    dataset: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict, path: str) -> "Project":
@@ -29,4 +29,3 @@ class Project:
         data = asdict(self)
         data.pop("path", None)
         return data
-

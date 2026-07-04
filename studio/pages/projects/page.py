@@ -16,9 +16,10 @@ class ProjectsPage(Page):
     title = "Projects"
     subtitle = "Create, open, and manage research projects."
 
-    def __init__(self, parent, project_service) -> None:
+    def __init__(self, parent, project_service, on_project_opened=None) -> None:
         super().__init__(parent)
         self.project_service = project_service
+        self.on_project_opened = on_project_opened
         self.projects = []
 
         self.content.rowconfigure(1, weight=1)
@@ -91,11 +92,13 @@ class ProjectsPage(Page):
 
     def open_project(self, project) -> None:
         try:
-            self.project_service.open_project(project.name)
+            opened_project = self.project_service.open_project(project.name)
         except (OSError, ValidationError) as error:
             messagebox.showerror("Open Project", str(error))
             return
 
+        if self.on_project_opened is not None:
+            self.on_project_opened(opened_project)
         self.load_projects()
 
     def open_rename_project_dialog(self, project) -> None:

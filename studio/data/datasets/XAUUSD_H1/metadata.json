@@ -1,0 +1,10 @@
+{
+  "symbol": "XAUUSD",
+  "timeframe": "H1",
+  "candles": 142336,
+  "start": "2008-01-01",
+  "end": "2026-01-01",
+  "missing": 41,
+  "quality": "Good",
+  "timezone": "UTC"
+}

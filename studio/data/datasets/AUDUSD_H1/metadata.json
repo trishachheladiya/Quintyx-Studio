@@ -1,0 +1,10 @@
+{
+  "symbol": "AUDUSD",
+  "timeframe": "H1",
+  "candles": 180612,
+  "start": "2003-01-01",
+  "end": "2026-01-01",
+  "missing": 28,
+  "quality": "Good",
+  "timezone": "UTC"
+}

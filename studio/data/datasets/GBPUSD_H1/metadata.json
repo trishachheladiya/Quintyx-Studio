@@ -1,0 +1,10 @@
+{
+  "symbol": "GBPUSD",
+  "timeframe": "H1",
+  "candles": 181904,
+  "start": "2003-01-01",
+  "end": "2026-01-01",
+  "missing": 12,
+  "quality": "Good",
+  "timezone": "UTC"
+}

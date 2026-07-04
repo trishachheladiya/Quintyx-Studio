@@ -1,0 +1,10 @@
+{
+  "symbol": "USDJPY",
+  "timeframe": "H1",
+  "candles": 182771,
+  "start": "2003-01-01",
+  "end": "2026-01-01",
+  "missing": 3,
+  "quality": "Excellent",
+  "timezone": "UTC"
+}

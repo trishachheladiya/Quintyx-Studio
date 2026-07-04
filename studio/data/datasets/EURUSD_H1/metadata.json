@@ -1,0 +1,10 @@
+{
+  "symbol": "EURUSD",
+  "timeframe": "H1",
+  "candles": 183421,
+  "start": "2003-01-01",
+  "end": "2026-01-01",
+  "missing": 0,
+  "quality": "Excellent",
+  "timezone": "UTC"
+}

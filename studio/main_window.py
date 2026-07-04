@@ -5,6 +5,7 @@ from tkinter import ttk
 
 try:
     from .sidebar import Sidebar
+    from .services import DatasetService
     from .services import ProjectService
     from .pages.dashboard import DashboardPage
     from .pages.projects import ProjectsPage
@@ -13,6 +14,7 @@ try:
     from .pages.settings import SettingsPage
 except ImportError:
     from sidebar import Sidebar
+    from services import DatasetService
     from services import ProjectService
     from pages.dashboard import DashboardPage
     from pages.projects import ProjectsPage
@@ -63,6 +65,8 @@ class QuintyxStudioApp(tk.Tk):
         self.theme_name = self.settings.get("theme", "dark")
         self.palette = THEMES[self.theme_name]
         self.project_service = ProjectService()
+        self.dataset_service = DatasetService(project_service=self.project_service)
+        self.current_project = None
         self.pages: dict[str, ttk.Frame] = {}
         self.current_page = tk.StringVar(value=self.settings.get("last_page", "Dashboard"))
 
@@ -113,8 +117,17 @@ class QuintyxStudioApp(tk.Tk):
     def build_pages(self) -> None:
         self.pages = {
             "Dashboard": DashboardPage(self.page_host),
-            "Projects": ProjectsPage(self.page_host, self.project_service),
-            "Research": ResearchPage(self.page_host),
+            "Projects": ProjectsPage(
+                self.page_host,
+                self.project_service,
+                on_project_opened=self.set_current_project,
+            ),
+            "Research": ResearchPage(
+                self.page_host,
+                self.dataset_service,
+                get_current_project=lambda: self.current_project,
+                set_current_project=self.set_current_project,
+            ),
             "Results": ResultsPage(self.page_host),
             "Settings": SettingsPage(
                 self.page_host,
@@ -134,7 +147,14 @@ class QuintyxStudioApp(tk.Tk):
         self.current_page.set(name)
         self.pages[name].tkraise()
         self.sidebar.set_active(name)
+        if hasattr(self.pages[name], "refresh_data"):
+            self.pages[name].refresh_data()
         self.save_settings()
+
+    def set_current_project(self, project) -> None:
+        self.current_project = project
+        if "Research" in self.pages and hasattr(self.pages["Research"], "refresh_data"):
+            self.pages["Research"].refresh_data()
 
     def set_theme(self, theme_name: str) -> None:
         if theme_name not in THEMES:
